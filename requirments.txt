@@ -1,0 +1,5 @@
+complextorch==1.2.0
+pytorch-lightning
+matplotlib==3.10.7
+
+
