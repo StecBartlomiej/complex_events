@@ -5,4 +5,5 @@ tonic
 hydra-core
 aedat
 opencv-python
+wandb
 

@@ -25,4 +25,9 @@ Example instalation
     pip3 install -r requirements.txt
 ```
 
+6. (Optional) To use wandb logger run 
+```sh
+    wandb login
+```
+
 

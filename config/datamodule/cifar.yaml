@@ -1,0 +1,7 @@
+_target_: datamodules.cifar.CIFAR10Datamodule
+batch_size: 16
+num_workers: 4
+val_split: 0.15
+test_split: 0.15
+sensor_size: [128, 128]
+time_step: 50e3
