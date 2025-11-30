@@ -34,6 +34,10 @@ class CIFARDataset(Dataset):
         self.samples = []
         for cls_name in self.classes:
             cls_folder = os.path.join(self.dataset_path, cls_name)
+
+            if not os.path.isdir(cls_folder):
+                continue
+
             for fname in os.listdir(cls_folder):
                 if fname.endswith(".aedat4"):
                     self.samples.append((os.path.join(cls_folder, fname), self.class_to_idx[cls_name]))
