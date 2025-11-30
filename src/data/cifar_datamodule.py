@@ -16,7 +16,7 @@ class CIFARDataset(Dataset):
         we have 10 classes (airplane, automobile, bird, cat, deer, dog, frog, horse, ship, truck) 
         Each folder has 1000 recordings in aedat format. Frame size is (128, 128). 
     '''
-    def __init__(self, root="./cifar10/data", transform=None, sensor_size=(128,128), time_step=100_000):
+    def __init__(self, root="./data", transform=None, sensor_size=(128,128), time_step=100_000):
         super().__init__()
         self.root = root
         self.transform = transform
@@ -101,7 +101,7 @@ class CIFAR10Datamodule(LightningDataModule):
         self.time_step = time_step
 
     def setup(self, stage=None):
-        full_dataset = CIFARDataset(root="./cifar10/data",
+        full_dataset = CIFARDataset(root="./data",
                                     sensor_size=self.sensor_size,
                                     time_step=self.time_step)
 
