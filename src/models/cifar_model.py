@@ -7,23 +7,24 @@ from pytorch_lightning import LightningModule
 class ComplexCifar(LightningModule):
     def __init__(self, in_ch, lr: float = 1e-3):
         super().__init__()
+        self.in_size = 128
         self.save_hyperparameters()
 
-
         # A simple complex CNN: two complex conv blocks -> complex linear classifier
-        # Input: (N, 28, 128, 128) real -> converted to complex with zero imaginary part
-        self.conv1 = Conv2d(in_ch, 16, kernel_size=3, padding=1)
+        # Input: (N, 1, 128, 128) real -> converted to complex with zero imaginary part
+        self.conv1 = Conv2d(in_ch, 32, kernel_size=3, padding=1)
         self.act1 = CVCardiod()
-        self.pool1 = AdaptiveAvgPool2d(in_ch // 2)
+        self.pool1 = AdaptiveAvgPool2d(self.in_size // 2)
 
 
-        self.conv2 = Conv2d(16, 32, kernel_size=3, padding=1)
+        self.conv2 = Conv2d(32, 64, kernel_size=3, padding=1)
         self.act2 = CVCardiod()
-        self.pool2 = AdaptiveAvgPool2d(in_ch // 4)
+        self.pool2 = AdaptiveAvgPool2d(self.in_size // 4)
 
 
-        self.fc1 = Linear(32 * ((in_ch // 4) ** 2), 128)
+        self.fc1 = Linear(64 * ((self.in_size // 4) ** 2), 128)
         self.fc_act = CVCardiod()
+        self.fc2 = Linear(128, 128)
 
         self.classifier = Linear(128, 10)
 
@@ -33,8 +34,6 @@ class ComplexCifar(LightningModule):
         x = self.act1(x)
         x = self.pool1(x)
 
-
-        # conv block 2
         x = self.conv2(x)
         x = self.act2(x)
         x = self.pool2(x)
@@ -44,6 +43,8 @@ class ComplexCifar(LightningModule):
         x = self.fc1(x)
         x = self.fc_act(x)
 
+        x = self.fc2(x)
+        x = self.fc_act(x)
 
         x = self.classifier(x)
         return x

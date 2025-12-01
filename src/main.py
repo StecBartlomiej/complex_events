@@ -4,16 +4,20 @@ from models.cifar_model import ComplexCifar
 import hydra
 from hydra.utils import instantiate
 from omegaconf import OmegaConf
+import torch
 
 
 @hydra.main(version_base=None, config_path="../config", config_name='config')
 def main(cfg):
     print(OmegaConf.to_yaml(cfg))
 
-    model = ComplexCifar(in_ch=28, lr=0.001)
+    model = ComplexCifar(in_ch=1, lr=0.001)
 
     datamodule = instantiate(cfg.datamodule)
     logger = instantiate(cfg.logger)
+
+
+    model = torch.compile(model)
 
     trainer = Trainer(
         max_epochs=cfg.epochs,
