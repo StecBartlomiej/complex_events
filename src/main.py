@@ -16,19 +16,17 @@ def main(cfg):
     datamodule = instantiate(cfg.datamodule)
     logger = instantiate(cfg.logger)
 
-
-    model = torch.compile(model)
-
     trainer = Trainer(
         max_epochs=cfg.epochs,
         accelerator="auto",
         devices="auto",
         log_every_n_steps=10,
-        default_root_dir='logs'
-#        logger=logger
+        default_root_dir='logs',
+        logger=logger
     )
 
     trainer.fit(model, datamodule)
+    trainer.test(model, datamodule)
 
 if __name__ == "__main__":
     main()

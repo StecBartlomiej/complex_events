@@ -3,3 +3,4 @@ venv/
 /data/*
 /logs/*
 /outputs
+/wandb
