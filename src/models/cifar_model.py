@@ -61,17 +61,17 @@ class ComplexCifar(LightningModule):
         # Input: (N, 1, 128, 128) real -> converted to complex with zero imaginary part
 
         # self.act = cnn.modReLU(-10)
-        self.act = cnn.CVSplitReLU(False)
-        # self.act = cnn.CVPolarLog()
+        #self.act = cnn.CVSplitReLU(False)
+        self.act = cnn.CVCardiod()
 
-        self.pool = AbsMaxPool2D(2)
-
-
-        self.conv1 = Conv2d(in_ch, 32, kernel_size=3, padding=1)
-        self.batch_norm1 = torchcvnn.nn.BatchNorm2d(32)
-
-        self.conv2 = Conv2d(32, 64, kernel_size=3, padding=1)
-        self.batch_norm2 = torchcvnn.nn.BatchNorm2d(64)
+        # self.pool = AbsMaxPool2D(2)
+        #
+        #
+        # self.conv1 = Conv2d(in_ch, 32, kernel_size=3, padding=1)
+        # self.batch_norm1 = torchcvnn.nn.BatchNorm2d(32)
+        #
+        # self.conv2 = Conv2d(32, 64, kernel_size=3, padding=1)
+        # self.batch_norm2 = torchcvnn.nn.BatchNorm2d(64)
 
         # self.conv3 = Conv2d(64, 128, kernel_size=3, padding=1)
         # self.batch_norm3 = torchcvnn.nn.BatchNorm2d(128)
@@ -80,40 +80,24 @@ class ComplexCifar(LightningModule):
         # self.batch_norm4 = torchcvnn.nn.BatchNorm2d(256)
 
         #self.dropout = torch.nn.Dropout(p=0.2)
-        self.fc1 = Linear(64 * ((self.in_size // 4) ** 2), 256)
-        self.fc2 = Linear(256, 128)
-        self.classifier = Linear(128, 10)
+        self.fc1 = Linear(128 * 65, 1024 * 8)
+        self.fc2 = Linear(1024 * 8, 1024 * 4)
+        self.fc3 = Linear(1024 * 4, 1024 * 2)
+        self.classifier = Linear(1024 * 2, 10)
 
 
     def forward(self, input):
-        x_complex = torch.fft.fft2(input)
+        x_complex = torch.fft.rfft2(input)
 
-        x = self.conv1(x_complex)
-        x = self.batch_norm1(x)
-        x = self.act(x)
-        x = self.pool(x)
-
-        x = self.conv2(x)
-        x = self.batch_norm2(x)
-        x = self.act(x)
-        x = self.pool(x)
-        
-        # x = self.conv3(x)
-        # x = self.batch_norm3(x)
-        # x = self.act(x)
-        # x = self.pool(x)
-        #
-        # x = self.conv4(x)
-        # x = self.batch_norm4(x)
-        # x = self.act(x)
-        # x = self.pool(x)
-
-        x = torch.flatten(x, 1)
+        x = torch.flatten(x_complex, 1)
 
         x = self.fc1(x)
         x = self.act(x)
 
         x = self.fc2(x)
+        x = self.act(x)
+
+        x = self.fc3(x)
         x = self.act(x)
 
         x = self.classifier(x)
