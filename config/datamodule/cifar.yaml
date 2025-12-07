@@ -4,4 +4,4 @@ num_workers: 4
 val_split: 0.15
 test_split: 0.15
 sensor_size: [128, 128]
-time_step: 50e3
+time_step: 100e3

@@ -28,11 +28,11 @@ class ComplexMNISTLightning(LightningModule):
         self.classifier = Linear(128, 10)
 
 
-    def forward(self, x_complex):
+    def forward(self, input):
+        x_complex = torch.fft.fft2(input)
         x = self.conv1(x_complex)
         x = self.act1(x)
         x = self.pool1(x)
-
 
         # conv block 2
         x = self.conv2(x)
