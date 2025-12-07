@@ -1,5 +1,5 @@
 defaults:
-  - datamodule: cifar
+  - datamodule: cifar3d
   - logger: wandb
 
 lr: 1e-3

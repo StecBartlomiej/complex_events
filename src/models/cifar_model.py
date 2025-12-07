@@ -5,7 +5,7 @@ from torch import nn
 from complextorch.nn import Linear, Conv2d, BatchNorm2d, CVCardiod
 from pytorch_lightning import LightningModule
 import complextorch.nn.functional as cvF
-import torchcvnn.nn
+# import torchcvnn.nn
 
 
 # Try maxpool on amplitude of complex number -> preserves phase
@@ -161,3 +161,70 @@ class ComplexCifar(LightningModule):
                 'monitor': 'train_loss'
                 }
 
+class ComplexCifar3D(LightningModule):
+    def __init__(self, lr: float = 1e-3, hidden_dims=[1024, 512, 256]):
+        super().__init__()
+        self.save_hyperparameters()
+        self.lr = lr
+        self.act = CVCardiod()
+        num_slices = 5  
+        H, W = 128, 128  
+        
+        self.fc1 = Linear(in_features=num_slices*H*W, out_features=hidden_dims[0])
+        self.fc2 = Linear(hidden_dims[0], hidden_dims[1])
+        self.fc3 = Linear(hidden_dims[1], hidden_dims[2])
+        self.classifier = Linear(hidden_dims[2], 10)
+
+    def forward(self, x):
+        # x: (B, 1, num_slices, H, W)
+        x_complex = x.squeeze(1)  # (B, S, H, W)
+        x_flat = torch.flatten(x_complex, 1)  # (B, S*H*W)
+
+        x = self.fc1(x_flat)
+        x = self.act(x)
+        x = self.fc2(x)
+        x = self.act(x)
+        x = self.fc3(x)
+        x = self.act(x)
+        x = self.classifier(x)
+        return x
+
+    def training_step(self, batch, batch_idx):
+        x, y = batch
+        logits_complex = self(x)
+        logits_real = torch.abs(logits_complex)  # używamy magnitudy
+        loss = F.cross_entropy(logits_real, y)
+        preds = torch.argmax(logits_real, dim=1)
+        acc = (preds == y).float().mean()
+        self.log('train_loss', loss, on_epoch=True, prog_bar=True)
+        self.log('train_acc', acc, on_epoch=True, prog_bar=True)
+        return loss
+
+    def validation_step(self, batch, batch_idx):
+        x, y = batch
+        logits_complex = self(x)
+        logits_real = torch.abs(logits_complex)
+        loss = F.cross_entropy(logits_real, y)
+        preds = torch.argmax(logits_real, dim=1)
+        acc = (preds == y).float().mean()
+        self.log('val_loss', loss, on_epoch=True, prog_bar=True)
+        self.log('val_acc', acc, on_epoch=True, prog_bar=True)
+
+    def test_step(self, batch, batch_idx):
+        x, y = batch
+        logits_complex = self(x)
+        logits_real = torch.abs(logits_complex)
+        loss = F.cross_entropy(logits_real, y)
+        preds = torch.argmax(logits_real, dim=1)
+        acc = (preds == y).float().mean()
+        self.log('test_loss', loss, on_epoch=True)
+        self.log('test_acc', acc, on_epoch=True)
+
+    def configure_optimizers(self):
+        opt = torch.optim.Adam(self.parameters(), lr=self.lr)
+        scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(opt, mode='min', factor=0.5, patience=5)
+        return {
+            'optimizer': opt,
+            'lr_scheduler': scheduler,
+            'monitor': 'train_loss'
+        }

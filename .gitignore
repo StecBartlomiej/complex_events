@@ -1,6 +1,8 @@
 venv/
+**/.vevn/
 **/__pycache__/**
-/data/*
-/logs/*
+**/data/*
+**/logs/*
 /outputs
 /wandb
+**complex_event/**
