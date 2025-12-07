@@ -6,7 +6,7 @@ from tqdm import tqdm
 import multiprocessing as mp
 
 
-class CIFAR10DVSPreprocessor:
+class CIFAR10DVS3DPreprocessor:
     def __init__(self,
                  dataset_path="./data",
                  output_root="./data/cifar10dvs_fft_bins",
@@ -117,7 +117,7 @@ class CIFAR10DVSPreprocessor:
 
 
 if __name__ == "__main__":
-    pre = CIFAR10DVSPreprocessor(
+    pre = CIFAR10DVS3DPreprocessor(
         dataset_path="./data/CIFAR10DVS",
         output_root="./data/cifar10dvs_fft_bins3d_test",
         sensor_size=(128, 128),
