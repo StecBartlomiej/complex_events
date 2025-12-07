@@ -1,8 +1,10 @@
 complextorch==1.2.0
 pytorch-lightning
 matplotlib==3.10.7
+scikit-learn
 tonic
 hydra-core
 aedat
 opencv-python
-
+wandb
+torchcvnn

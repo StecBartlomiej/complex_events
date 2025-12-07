@@ -5,7 +5,7 @@ import torchvision.transforms as T
 
 
 class MNISTDataModule(LightningDataModule):
-    def __init__(self, batch_size=64):
+    def __init__(self, batch_size, num_workers):
         super().__init__()
         self.batch_size = batch_size
         self.transform = T.ToTensor()
