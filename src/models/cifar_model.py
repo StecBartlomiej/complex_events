@@ -33,6 +33,20 @@ class AbsMaxPool2D(nn.Module):
         return output
 
 
+class FrequencyInstanceNorm2D(nn.Module):
+    def __init__(self, num_features):
+        super(FrequencyInstanceNorm2D, self).__init__()
+        self.num_features = num_features
+        self.gamma = nn.Parameter(torch.ones(num_features, dtype=torch.complex64))
+        self.beta = nn.Parameter(torch.zeros(num_features, dtype=torch.complex64))
+
+    def forward(self, inputs):
+        mean = torch.mean(inputs, dim=(-2, -1), keepdim=True)
+        var = torch.var(inputs, dim=(-2, -1), unbiased=False, keepdim=True)
+        freq_normalized = (inputs - mean) / torch.sqrt(var + 1e-5)
+        freq_output = self.gamma.view(1, -1, 1, 1) * freq_normalized + self.beta.view(1, -1, 1, 1)
+        return freq_output
+
 
 class FrequencyConv2D(nn.Module):
     def __init__(self, in_channels, out_channels, kernel_size):
