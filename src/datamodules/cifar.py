@@ -58,12 +58,14 @@ class CIFAR10Datamodule(LightningDataModule):
         self.root = Path("./data/cifar10dvs_raw_bins")
         self.train_transform = transforms.Compose([
             transforms.ToTensor(),
-            transforms.Normalize(mean=[0.5], std=[0.5]),
+            transforms.Resize((64, 64)),
+            transforms.Normalize(mean=[0], std=[1]),
             transforms.RandomRotation(10)
             ])
         self.val_test_transform = transforms.Compose([
             transforms.ToTensor(),
-            transforms.Normalize(mean=[0.5], std=[0.5]),
+            transforms.Resize((64, 64)),
+            transforms.Normalize(mean=[0], std=[1]),
             ])
 
     def setup(self, stage=None):

@@ -18,14 +18,12 @@ def main(cfg):
     logger = instantiate(cfg.logger)
 
     trainer = Trainer(
-        max_epochs=1,
+        max_epochs=6,
         accelerator="auto",
         devices="auto",
         log_every_n_steps=10,
         default_root_dir='logs',
-        logger=logger,
-        callbacks=[DeviceStatsMonitor()],
-        profiler='simple'
+        logger=logger
     )
 
     with trainer.init_module():
