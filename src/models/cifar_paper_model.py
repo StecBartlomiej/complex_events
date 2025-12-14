@@ -11,32 +11,33 @@ from utils.complex_layers import *
 # Try maxpool on amplitude of complex number -> preserves phase
 
 
-class ComplexCifar(LightningModule):
+class ComplexCifarPaper(LightningModule):
     def __init__(self, in_ch, lr: float = 1e-3):
-        super().__init__()
+        super(ComplexCifarPaper, self).__init__()
         self.in_size = 128
         self.save_hyperparameters()
 
         # A simple complex CNN: two complex conv blocks -> complex linear classifier
         # Input: (N, 1, 128, 128) real -> converted to complex with zero imaginary part
 
-        self.conv1 = FrequencyConv2D(1, 128, kernel_size=28)
-        self.ln1 = FrequencyInstanceNorm2D(128)
+        self.conv1 = FrequencyConv2D(1, 32, kernel_size=64)
+        self.ln1 = FrequencyInstanceNorm2D(32)
         
-        self.layer1 = self._make_layer(128, 128, kernel_size=20, num_blocks=1)
-        self.layer2 = self._make_layer(128, 256, kernel_size=10, num_blocks=1)
-        self.layer3 = self._make_layer(256, 2*256, kernel_size=5, num_blocks=1)
-        self.layer4 = self._make_layer(2*256, 2*512, kernel_size=2, num_blocks=1)
+        self.layer1 = self._make_layer(32, 64, kernel_size=32, num_blocks=1)
+        self.layer2 = self._make_layer(64, 128, kernel_size=16, num_blocks=1)
+        self.layer3 = self._make_layer(128, 256, kernel_size=8, num_blocks=1)
+        # self.layer4 = self._make_layer(512, 512, kernel_size=4, num_blocks=1)
         
-        self.pooling_layer = ComplexAdaptiveAvgPool2d(output_size=(20, 20))
-        self.pooling_layer1 = ComplexAdaptiveAvgPool2d(output_size=(10, 10))
-        self.pooling_layer2 = ComplexAdaptiveAvgPool2d(output_size=(5, 5))
-        self.pooling_layer3 = ComplexAdaptiveAvgPool2d(output_size=(2, 2))
+        self.pooling_layer = ComplexAdaptiveAvgPool2d(output_size=(32, 32))
+        self.pooling_layer1 = ComplexAdaptiveAvgPool2d(output_size=(16, 16))
+        self.pooling_layer2 = ComplexAdaptiveAvgPool2d(output_size=(8, 8))
+        # self.pooling_layer3 = ComplexAdaptiveAvgPool2d(output_size=(4, 4))
         
 
         self.avgpool = ComplexAdaptiveMaxPool2d(output_size=(1, 1))
-        self.fc2 = FrequencyLinear(2*512, 10)
+        self.fc2 = FrequencyLinear(256, 10)
         self.dropout = ComplexDropout(p=0.3)
+    
     
     def _make_layer(self, in_channels, out_channels, kernel_size, num_blocks):
         layers = []
@@ -61,10 +62,10 @@ class ComplexCifar(LightningModule):
         
 
         x = self.layer3(x)
-        x = self.pooling_layer3(x)
+        # x = self.pooling_layer3(x)
         
 
-        x = self.layer4(x)
+        # x = self.layer4(x)
 
         x = self.avgpool(x)
         x = x.view(x.size(0), -1)

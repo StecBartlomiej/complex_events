@@ -169,12 +169,10 @@ class ResidualBlock(nn.Module):
             
     def forward(self, x):
 
-        x = self.conv1(x)
-        x = self.ln1(x)
-        x = LOG_Magnitude(x)        #tutaj można dodać Cartoide na przykład, paper mówi żeby dać taką
-        x = self.conv2(x)
-        x = self.ln2(x)
-        x = x + self.skip_connection(x)
-        out = LOG_Magnitude(x)
+        out = self.ln1(self.conv1(x))
+        out = LOG_Magnitude(out)        #tutaj można dodać Cartoide na przykład, paper mówi żeby dać taką
+        out = self.ln2(self.conv2(out)) 
+        out = out + self.skip_connection(x)
+        out = LOG_Magnitude(out)
 
         return out

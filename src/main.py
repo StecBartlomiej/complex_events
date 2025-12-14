@@ -1,6 +1,7 @@
 from pytorch_lightning import Trainer
 from pytorch_lightning.callbacks import DeviceStatsMonitor
 from models.cifar_model import ComplexCifar
+from models.cifar_paper_model import ComplexCifarPaper
 import hydra
 from hydra.utils import instantiate
 from omegaconf import OmegaConf
@@ -28,7 +29,7 @@ def main(cfg):
 
     with trainer.init_module():
         datamodule = instantiate(cfg.datamodule)
-        model = ComplexCifar(in_ch=1, lr=cfg.lr)
+        model = ComplexCifarPaper(in_ch=1, lr=cfg.lr)
 
 
     trainer.fit(model, datamodule)
