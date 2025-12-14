@@ -97,28 +97,18 @@ class CIFAR10DVSPreprocessor:
         H, W = self.sensor_size
         frames = np.zeros((n_bins, H, W), dtype=np.float32)
 
+        t_sec = (t - t.min()) * 1e-6  # us → s
+
         bin_idx = ((t - t.min()) / self.time_step).astype(int)
         bin_idx = np.clip(bin_idx, 0, n_bins - 1)
 
-        # visited_bins = set()
-        # t_max = 0
-        # # iteracja od końca (ostatnie zdarzenia najpierw)
-        # for ti, xi, yi, pi, bi in zip(t[::-1], x[::-1], y[::-1], p[::-1], bin_idx[::-1]):
-        #     if bi not in visited_bins:
-        #         t_max = ti
-        #         visited_bins.add(bi)
-
-        #     decay = np.exp(-abs(t_max - ti) / delta_t)
-        #     frames[bi, xi, yi] = (pi * decay + 1.0) * (255.0 / 2.0)
-
-        # t_max dla każdego binu (ostatni timestamp w binie)
         t_max_bins = np.zeros(n_bins, dtype=t.dtype)
         for b in range(n_bins):
             mask = bin_idx == b
             if np.any(mask):
-                t_max_bins[b] = t[mask][-1]
+                t_max_bins[b] = t_sec[mask].max()  # lub jak jest pewna chronologiczna kolejność t_sec[mask][-1]
 
-        decay = np.exp(-np.abs(t_max_bins[bin_idx] - t) / delta_t)
+        decay = np.exp(-(t_max_bins[bin_idx] - t_sec) / delta_t)
 
         np.maximum.at(frames, (bin_idx, x, y), (p * decay + 1.0) * (255.0 / 2.0))
 
@@ -141,7 +131,7 @@ class CIFAR10DVSPreprocessor:
         n_bins = int(np.ceil((t_max - t_min) / self.time_step))
 
         if self.data_representation == "exp_frames":
-            voxel = self.__build_exp_frames(t, x, y, p, n_bins, delta_t=self.time_step)
+            voxel = self.__build_exp_frames(t, x, y, p, n_bins, delta_t=0.06)
         else:  # self.data_representation == "voxel"
             voxel = self.__build_raw_voxel_grid(t, x, y, p, n_bins)
 
@@ -173,11 +163,12 @@ class CIFAR10DVSPreprocessor:
 if __name__ == "__main__":
     pre = CIFAR10DVSPreprocessor(
         dataset_path="./data/CIFAR10DVS",
-        output_root="./data/cifar10dvs_raw_bins",
-        # output_root="./data/cifar10dvs_exp_frames",
+        # output_root="./data/cifar10dvs_raw_bins",
+        output_root="./data/cifar10dvs_exp_frames",
         time_step=100_000,
         sensor_size=(128, 128),
         num_workers=8,
-        data_represenation="voxel"
+        # data_represenation="voxel",
+        data_represenation="exp_frames"
     )
     pre.run()
