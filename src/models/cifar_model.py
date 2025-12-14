@@ -31,6 +31,37 @@ class AbsMaxPool2D(nn.Module):
         x = torch.flatten(input, 2)
         output = torch.gather(x, 2, torch.flatten(max_idx, 2)).view(mag_max.size())
         return output
+    
+class ComplexAdaptiveMaxPool2d(nn.Module):
+
+    def __init__(self, output_size):
+        super(ComplexAdaptiveMaxPool2d, self).__init__()
+        self.output_size = output_size
+        self.pool_real = nn.AdaptiveMaxPool2d(output_size)
+        self.pool_imag = nn.AdaptiveMaxPool2d(output_size)
+
+    def forward(self, x):
+        real = x.real
+        imag = x.imag
+        pooled_real = self.pool_real(real)
+        pooled_imag = self.pool_imag(imag)
+        pooled = torch.complex(pooled_real, pooled_imag)
+        return pooled
+    
+class ComplexAdaptiveAvgPool2d(nn.Module):
+    def __init__(self, output_size):
+        super(ComplexAdaptiveAvgPool2d, self).__init__()
+        self.output_size = output_size
+        self.pool_real = nn.AdaptiveAvgPool2d(output_size)
+        self.pool_imag = nn.AdaptiveAvgPool2d(output_size)
+
+    def forward(self, inputs):
+        real_part, imag_part, _ = complex_to_real_imag(inputs)
+        pooled_real = self.pool_real(real_part)
+        pooled_imag = self.pool_imag(imag_part)
+        pooled_output = torch.complex(pooled_real, pooled_imag)
+        return pooled_output  
+
 
 
 class FrequencyInstanceNorm2D(nn.Module):
