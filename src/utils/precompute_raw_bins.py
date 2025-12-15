@@ -13,13 +13,15 @@ class CIFAR10DVSPreprocessor:
                  output_root="./data/cifar10dvs_fft_bins",
                  time_step=100_000,
                  sensor_size=(128, 128),
-                 num_workers=None):
+                 num_workers=None,
+                 data_represenation="voxel"):
         self.data_root = Path(dataset_path).parent
         self.output_root = Path(output_root)
         self.time_step = time_step
         self.sensor_size = sensor_size
         self.num_workers = num_workers 
         self.dataset_path = Path(dataset_path)
+        self.data_representation = data_represenation  # "voxel" | "exp_frames"
 
     def to_dict(self):
         return {
@@ -48,6 +50,69 @@ class CIFAR10DVSPreprocessor:
                 if f.name.endswith(".aedat4"):
                     workload.append((f, label))
         return workload, class_to_idx
+    
+    def __build_raw_voxel_grid(self, t, x, y, p, n_bins):
+        """
+        Tworzy zwykłe event frame'y na podstawie zdarzeń.
+        Parameters
+        x, y : ndarray
+            Współrzędne pikseli zdarzeń
+        p : ndarra 
+            Polaryzacja zdarzeń (-1/1)
+        n_bins : int
+            Liczba przedziałów czasowych
+
+        Returns
+        frames : ndarray of shape (n_bins, H, W)
+            Event frame'y
+        """
+        H, W = self.sensor_size
+        voxel = np.zeros((n_bins, H, W), dtype=np.float32)
+
+        bin_idx = ((t - t.min()) / self.time_step).astype(int)
+        bin_idx = np.clip(bin_idx, 0, n_bins - 1)
+
+        for b, xi, yi, pi in zip(bin_idx, x, y, p):
+            voxel[b, xi, yi] += pi
+
+        return voxel
+    
+    def __build_exp_frames(self, t, x, y, p, n_bins, delta_t):
+        """
+        Tworzy event freme'y za pomocą wykładniczego zanikania (exponential decay).
+        
+        Parameters
+        t, x, y, p : ndarray
+            Dane zdarzeń
+        n_bins : int
+            Ilość binów czasowych
+        delta_t : float
+            Stała czasowa zanikania wykładniczego
+
+        Returns
+        frames : ndarray shape (n_bins, H, W)
+            Event frames zbudowane metodą wykładniczą
+        """
+
+        H, W = self.sensor_size
+        frames = np.zeros((n_bins, H, W), dtype=np.float32)
+
+        t_sec = (t - t.min()) * 1e-6  # us → s
+
+        bin_idx = ((t - t.min()) / self.time_step).astype(int)
+        bin_idx = np.clip(bin_idx, 0, n_bins - 1)
+
+        t_max_bins = np.zeros(n_bins, dtype=t.dtype)
+        for b in range(n_bins):
+            mask = bin_idx == b
+            if np.any(mask):
+                t_max_bins[b] = t_sec[mask].max()  # lub jak jest pewna chronologiczna kolejność t_sec[mask][-1]
+
+        decay = np.exp(-(t_max_bins[bin_idx] - t_sec) / delta_t)
+
+        np.maximum.at(frames, (bin_idx, x, y), (p * decay + 1.0) * (255.0 / 2.0))
+
+        return frames
 
     def _process_single(self, args):
         file_path, label = args
@@ -65,13 +130,10 @@ class CIFAR10DVSPreprocessor:
         t_min, t_max = t.min(), t.max()
         n_bins = int(np.ceil((t_max - t_min) / self.time_step))
 
-        voxel = np.zeros((n_bins, self.sensor_size[0], self.sensor_size[1]), dtype=np.float32)
-
-        bin_idx = ((t - t_min) / self.time_step).astype(int)
-        bin_idx = np.clip(bin_idx, 0, n_bins - 1)
-
-        for b, xi, yi, pi in zip(bin_idx, x, y, p):
-            voxel[b, xi, yi] += pi
+        if self.data_representation == "exp_frames":
+            voxel = self.__build_exp_frames(t, x, y, p, n_bins, delta_t=0.06)
+        else:  # self.data_representation == "voxel"
+            voxel = self.__build_raw_voxel_grid(t, x, y, p, n_bins)
 
         for bin_id in range(n_bins):
             out_path = class_folder / f"{file_path.stem}_{bin_id}_raw.npz"
@@ -101,9 +163,12 @@ class CIFAR10DVSPreprocessor:
 if __name__ == "__main__":
     pre = CIFAR10DVSPreprocessor(
         dataset_path="./data/CIFAR10DVS",
-        output_root="./data/cifar10dvs_raw_bins",
+        # output_root="./data/cifar10dvs_raw_bins",
+        output_root="./data/cifar10dvs_exp_frames",
         time_step=100_000,
         sensor_size=(128, 128),
-        num_workers=8
+        num_workers=8,
+        # data_represenation="voxel",
+        data_represenation="exp_frames"
     )
     pre.run()

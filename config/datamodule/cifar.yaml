@@ -1,5 +1,5 @@
 _target_: datamodules.cifar.CIFAR10Datamodule
-batch_size: 64
+batch_size: 32
 num_workers: 4
 val_split: 0.15
 test_split: 0.15

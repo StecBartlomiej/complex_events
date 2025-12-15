@@ -2,7 +2,7 @@ from complextorch import nn as cnn
 import torch
 import torch.nn.functional as F
 from torch import nn
-from complextorch.nn import Linear, Conv2d, BatchNorm2d, CVCardiod
+from complextorch.nn import Linear, Conv2d, CVCardiod, AdaptiveAvgPool2d
 from pytorch_lightning import LightningModule
 import complextorch.nn.functional as cvF
 import torchcvnn.nn
@@ -15,7 +15,6 @@ class CVMaxPool2D(torch.nn.MaxPool2d):
 
     def forward(self, input: torch.Tensor) -> torch.Tensor:
         return cvF.apply_complex_split(super().forward, super().forward, input)
-
 
 
 class AbsMaxPool2D(nn.Module):
@@ -32,23 +31,111 @@ class AbsMaxPool2D(nn.Module):
         x = torch.flatten(input, 2)
         output = torch.gather(x, 2, torch.flatten(max_idx, 2)).view(mag_max.size())
         return output
+    
+class ComplexAdaptiveMaxPool2d(nn.Module):
+
+    def __init__(self, output_size):
+        super(ComplexAdaptiveMaxPool2d, self).__init__()
+        self.output_size = output_size
+        self.pool_real = nn.AdaptiveMaxPool2d(output_size)
+        self.pool_imag = nn.AdaptiveMaxPool2d(output_size)
+
+    def forward(self, x):
+        real = x.real
+        imag = x.imag
+        pooled_real = self.pool_real(real)
+        pooled_imag = self.pool_imag(imag)
+        pooled = torch.complex(pooled_real, pooled_imag)
+        return pooled
+    
+class ComplexAdaptiveAvgPool2d(nn.Module):
+    def __init__(self, output_size):
+        super(ComplexAdaptiveAvgPool2d, self).__init__()
+        self.output_size = output_size
+        self.pool_real = nn.AdaptiveAvgPool2d(output_size)
+        self.pool_imag = nn.AdaptiveAvgPool2d(output_size)
+
+    def forward(self, inputs):
+        real_part, imag_part, _ = complex_to_real_imag(inputs)
+        pooled_real = self.pool_real(real_part)
+        pooled_imag = self.pool_imag(imag_part)
+        pooled_output = torch.complex(pooled_real, pooled_imag)
+        return pooled_output  
 
 
-# TODO: implement complex batch normalization
+
+class FrequencyInstanceNorm2D(nn.Module):
+    def __init__(self, num_features):
+        super(FrequencyInstanceNorm2D, self).__init__()
+        self.num_features = num_features
+        self.gamma = nn.Parameter(torch.ones(num_features, dtype=torch.complex64))
+        self.beta = nn.Parameter(torch.zeros(num_features, dtype=torch.complex64))
+
+    def forward(self, inputs):
+        mean = torch.mean(inputs, dim=(-2, -1), keepdim=True)
+        var = torch.var(inputs, dim=(-2, -1), unbiased=False, keepdim=True)
+        freq_normalized = (inputs - mean) / torch.sqrt(var + 1e-5)
+        freq_output = self.gamma.view(1, -1, 1, 1) * freq_normalized + self.beta.view(1, -1, 1, 1)
+        return freq_output
 
 
+class FrequencyConv2D(nn.Module):
+    def __init__(self, in_channels, out_channels, kernel_size):
+        super(FrequencyConv2D, self).__init__()
+        self.in_channels = in_channels
+        self.out_channels = out_channels
+        self.kernel_size = kernel_size
+
+        if in_channels != out_channels:
+            self.filters = nn.Parameter(torch.randn(out_channels, in_channels, kernel_size, kernel_size, dtype=torch.complex64))
+        else:
+            self.filters = nn.Parameter(torch.randn(out_channels, kernel_size, kernel_size, dtype=torch.complex64))
+        self.Initialization()
+
+    def Initialization(self):
+        bound = 1 / (self.in_channels ** 0.5)  
+        nn.init.uniform_(self.filters.real, -bound, bound)
+        nn.init.uniform_(self.filters.imag, -bound, bound)
+
+    def forward(self, inputs):
+        batch_size, in_channels, height, width = inputs.shape
+        if self.in_channels != self.out_channels:
+            inputs_expanded = inputs.unsqueeze(1)
+            filters_expanded = self.filters.unsqueeze(0)
+            freq_output = inputs_expanded * filters_expanded
+            freq_output = freq_output.sum(dim=2)
+        else:
+            freq_output = inputs * self.filters
+        return freq_output
+
+# TODO: add instance normalization
 class ResidualBlock(nn.Module):
-    def __init__(self, ch_in, ch_out, kernel=3):
+    def __init__(self, ch_in, ch_out, kernel):
         super().__init__()
-        self.activation = cnn.CVSplitReLU(False)
+        self.act = cnn.CVCardiod()
 
-        self.conv1 = Conv2d(ch_in, ch_out, kernel_size=kernel)
-        self.conv2 = Conv2d(ch_out, ch_out, kernel_size=kernel)
+        self.conv1 = FrequencyConv2D(ch_in, ch_out, kernel_size=kernel)
+        self.conv2 = FrequencyConv2D(ch_out, ch_out, kernel_size=kernel)
 
-        self.residual = nn.Sequential()
+        self.norm = torchcvnn.nn.BatchNorm2d(ch_out)
+        
+        self.residual = None
         if ch_in != ch_out:
-            pass
+            self.residual = FrequencyConv2D(ch_in, ch_out, kernel_size=kernel)
+            
+    def forward(self, x):
+        skip = x if self.residual is None else self.residual(x) 
 
+        x = self.conv1(x)
+        x = self.act(x)
+        x = self.conv2(x)
+
+        x = x + skip
+
+        x = self.act(x)
+        x = self.norm(x)
+
+        return x
 
 
 class ComplexCifar(LightningModule):
@@ -60,53 +147,50 @@ class ComplexCifar(LightningModule):
         # A simple complex CNN: two complex conv blocks -> complex linear classifier
         # Input: (N, 1, 128, 128) real -> converted to complex with zero imaginary part
 
-        # self.act = cnn.modReLU(-10)
-        self.act = cnn.CVSplitReLU(False)
-        # self.act = cnn.CVPolarLog()
+        self.act = cnn.CVCardiod()
 
-        self.pool = AbsMaxPool2D(2)
+        self.conv1 = FrequencyConv2D(in_ch, 32, kernel_size=64)
+        self.norm1 = torchcvnn.nn.BatchNorm2d(32)
+        self.pool1 = AdaptiveAvgPool2d(32)
 
+        self.conv2 = FrequencyConv2D(32, 64, kernel_size=32)
+        self.norm2 = torchcvnn.nn.BatchNorm2d(64)
+        self.pool2 = AdaptiveAvgPool2d(16)
 
-        self.conv1 = Conv2d(in_ch, 32, kernel_size=3, padding=1)
-        self.batch_norm1 = torchcvnn.nn.BatchNorm2d(32)
+        self.conv3 = FrequencyConv2D(64, 128, kernel_size=16)
+        self.norm3 = torchcvnn.nn.BatchNorm2d(128)
+        self.pool3 = AdaptiveAvgPool2d(8)
+        
+        self.conv4 = FrequencyConv2D(128, 256, kernel_size=8)
+        self.norm4 = torchcvnn.nn.BatchNorm2d(256)
+        self.pool4 = AdaptiveAvgPool2d(4)
 
-        self.conv2 = Conv2d(32, 64, kernel_size=3, padding=1)
-        self.batch_norm2 = torchcvnn.nn.BatchNorm2d(64)
-
-        # self.conv3 = Conv2d(64, 128, kernel_size=3, padding=1)
-        # self.batch_norm3 = torchcvnn.nn.BatchNorm2d(128)
-        #
-        # self.conv4 = Conv2d(128, 256, kernel_size=3, padding=1)
-        # self.batch_norm4 = torchcvnn.nn.BatchNorm2d(256)
-
-        #self.dropout = torch.nn.Dropout(p=0.2)
-        self.fc1 = Linear(64 * ((self.in_size // 4) ** 2), 256)
+        self.fc1 = Linear(256 * 4 * 4, 256)
         self.fc2 = Linear(256, 128)
         self.classifier = Linear(128, 10)
-
 
     def forward(self, input):
         x_complex = torch.fft.fft2(input)
 
         x = self.conv1(x_complex)
-        x = self.batch_norm1(x)
+        x = self.norm1(x)
         x = self.act(x)
-        x = self.pool(x)
+        x = self.pool1(x)
 
         x = self.conv2(x)
-        x = self.batch_norm2(x)
+        x = self.norm2(x)
         x = self.act(x)
-        x = self.pool(x)
+        x = self.pool2(x)
         
-        # x = self.conv3(x)
-        # x = self.batch_norm3(x)
-        # x = self.act(x)
-        # x = self.pool(x)
-        #
-        # x = self.conv4(x)
-        # x = self.batch_norm4(x)
-        # x = self.act(x)
-        # x = self.pool(x)
+        x = self.conv3(x)
+        x = self.norm3(x)
+        x = self.act(x)
+        x = self.pool3(x)
+
+        x = self.conv4(x)
+        x = self.norm4(x)
+        x = self.act(x)
+        x = self.pool4(x)
 
         x = torch.flatten(x, 1)
 
