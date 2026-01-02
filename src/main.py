@@ -28,7 +28,7 @@ def main(cfg):
 
 
     trainer = Trainer(
-        max_epochs=15,
+        max_epochs=cfg.epochs,
         accelerator="auto",
         devices="auto",
         log_every_n_steps=10,
@@ -38,7 +38,7 @@ def main(cfg):
     )
 
     datamodule = instantiate(cfg.datamodule)
-    model = ComplexCifarPaper(in_ch=cfg.datamodule.in_channels, lr=cfg.lr)
+    model = instantiate(cfg.model)
 
     trainer.fit(model, datamodule=datamodule)
     trainer.validate(datamodule=datamodule)

@@ -7,4 +7,4 @@ complex_event/
 /outputs
 /wandb
 .vevn/
-models/
+checkpoints/

@@ -1,0 +1,3 @@
+_target_: models.cifar_paper_model.ComplexCifarPaper
+in_ch: ${common.in_channels}
+lr: ${common.in_channels}

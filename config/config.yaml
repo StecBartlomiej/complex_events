@@ -1,9 +1,12 @@
 defaults:
   - datamodule: cifar
   - logger: wandb
+  - model: cifar_paper
 
-lr: 1e-3
+common:
+  in_channels: 1
+  lr: 1e-3
+ 
 epochs: 5
 seed: 123
-checkpoint_dir: models
-
+checkpoint_dir: checkpoints
