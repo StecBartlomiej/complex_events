@@ -1,5 +1,4 @@
 from pytorch_lightning import Trainer
-from models.cifar_paper_model import ComplexCifarPaper
 import hydra
 from hydra.utils import instantiate
 from omegaconf import OmegaConf

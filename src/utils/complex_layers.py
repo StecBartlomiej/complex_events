@@ -1,3 +1,4 @@
+from typing_extensions import deprecated
 from complextorch import nn as cnn
 import torch
 import torch.nn.functional as F
@@ -7,7 +8,9 @@ from pytorch_lightning import LightningModule
 import complextorch.nn.functional as cvF
 import torchcvnn.nn
 
+
 ACTIVATION_OPTION = 0
+
 
 ## ========================= FUNKCJE POMOCNICZE ========================= ##
 
@@ -28,7 +31,7 @@ def act_funtion(x, option = 0):
         return LOG_Magnitude(x)
     elif option == 1:
         return cnn.CVCardiod()(x)
-    
+
 ## ========================= WARSTWY ZESPOLONE ========================= ##
 
 class ComplexDropout(nn.Module):
@@ -89,6 +92,8 @@ class FrequencyLinear(nn.Module):
         freq_output = freq_output.sum(-1)
         return freq_output
 
+
+@deprecated("It's useless")
 class AbsMaxPool2D(nn.Module):
     def __init__(self, kernel_size=2): 
         super().__init__()
