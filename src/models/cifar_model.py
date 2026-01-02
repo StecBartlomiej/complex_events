@@ -141,7 +141,7 @@ class ResidualBlock(nn.Module):
 class ComplexCifar(LightningModule):
     def __init__(self, in_ch, lr: float = 1e-3):
         super().__init__()
-        self.in_size = 128
+        self.in_ch = in_ch
         self.save_hyperparameters()
 
         # A simple complex CNN: two complex conv blocks -> complex linear classifier
@@ -149,7 +149,7 @@ class ComplexCifar(LightningModule):
 
         self.act = cnn.CVCardiod()
 
-        self.conv1 = FrequencyConv2D(in_ch, 32, kernel_size=64)
+        self.conv1 = FrequencyConv2D(self.in_ch, 32, kernel_size=64)
         self.norm1 = torchcvnn.nn.BatchNorm2d(32)
         self.pool1 = AdaptiveAvgPool2d(32)
 

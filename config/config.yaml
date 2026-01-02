@@ -5,4 +5,5 @@ defaults:
 lr: 1e-3
 epochs: 5
 seed: 123
+checkpoint_dir: models
 

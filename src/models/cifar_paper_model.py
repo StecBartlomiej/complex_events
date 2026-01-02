@@ -8,13 +8,12 @@ import complextorch.nn.functional as cvF
 import torchcvnn.nn
 from utils.complex_layers import *
 
-# Try maxpool on amplitude of complex number -> preserves phase
 
 
 class ComplexCifarPaper(LightningModule):
     def __init__(self, in_ch, lr: float = 1e-3):
         super(ComplexCifarPaper, self).__init__()
-        self.in_size = 128
+        self.in_ch = in_ch
         self.save_hyperparameters()
 
         # A simple complex CNN: two complex conv blocks -> complex linear classifier

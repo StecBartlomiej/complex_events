@@ -47,7 +47,7 @@ class CIFAR10DVSBins(Dataset):
 
 
 class CIFAR10Datamodule(LightningDataModule):
-    def __init__(self, batch_size=16, num_workers=0, val_split=0.15, test_split=0.15, sensor_size=(128,128), time_step=100_000):
+    def __init__(self, batch_size=16, num_workers=0, val_split=0.15, test_split=0.15, sensor_size=(128,128), time_step=100_000, in_channels=1):
         super().__init__()
         self.batch_size = batch_size
         self.num_workers = num_workers
@@ -55,6 +55,7 @@ class CIFAR10Datamodule(LightningDataModule):
         self.test_split = test_split
         self.sensor_size = sensor_size
         self.time_step = time_step
+        self.in_channels = in_channels
         self.root = Path("./data/cifar10dvs_raw_bins")
         self.train_transform = transforms.Compose([
             transforms.ToTensor(),
@@ -67,12 +68,12 @@ class CIFAR10Datamodule(LightningDataModule):
             transforms.Resize((64, 64)),
             transforms.Normalize(mean=[0], std=[1]),
             ])
+        self._compute_splits()
 
-    def setup(self, stage=None):
+    def _compute_splits(self):
         video_per_label: dict[int, list[str]] = {}
         for i in range(10):
             video_per_label[i] = []
-
 
         # create dict with video_id per label
         for class_folder in sorted(self.root.iterdir()):
@@ -84,22 +85,23 @@ class CIFAR10Datamodule(LightningDataModule):
                         video_idx = get_video_id(f.name)
                         video_per_label[label].append(video_idx)
 
-        train_video_ids: dict[int, set[int]] = {}
-        val_video_ids: dict[int, set[int]] = {}
-        test_video_ids: dict[int, set[int]] = {}
+        self.train_video_ids: dict[int, set[int]] = {}
+        self.val_video_ids: dict[int, set[int]] = {}
+        self.test_video_ids: dict[int, set[int]] = {}
 
         for label, video_ids in video_per_label.items():
             # train: 0.7, val:0.15, test:0.15
             train_paths, val_paths = train_test_split(list(set(video_ids)), test_size=0.3)
             val_paths, test_paths = train_test_split(val_paths, test_size=0.5) 
             
-            train_video_ids[label] = set(train_paths)
-            val_video_ids[label] = set(val_paths)
-            test_video_ids[label] = set(test_paths)
+            self.train_video_ids[label] = set(train_paths)
+            self.val_video_ids[label] = set(val_paths)
+            self.test_video_ids[label] = set(test_paths)
 
-        self.train_dataset = CIFAR10DVSBins(train_video_ids, self.root, transform=self.train_transform)
-        self.val_dataset = CIFAR10DVSBins(val_video_ids, self.root, transform=self.val_test_transform)
-        self.test_dataset = CIFAR10DVSBins(test_video_ids, self.root, transform=self.val_test_transform)
+    def setup(self, stage=None):
+        self.train_dataset = CIFAR10DVSBins(self.train_video_ids, self.root, transform=self.train_transform)
+        self.val_dataset = CIFAR10DVSBins(self.val_video_ids, self.root, transform=self.val_test_transform)
+        self.test_dataset = CIFAR10DVSBins(self.test_video_ids, self.root, transform=self.val_test_transform)
 
     def train_dataloader(self):
         return DataLoader(self.train_dataset,
