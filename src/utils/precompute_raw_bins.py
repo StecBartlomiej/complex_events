@@ -14,7 +14,11 @@ class CIFAR10DVSPreprocessor:
                  time_step=100_000,
                  sensor_size=(128, 128),
                  num_workers=None,
-                 data_represenation="voxel"):
+                 data_represenation="voxel",
+                 pos_polarity=True,
+                 neg_polarity=False,  # Jak chcemy mieć dwa kanały dla polarity w voxel grid, zamiast brać tylko pozytywnych
+                 max_events_per_px=5
+                 ):
         self.data_root = Path(dataset_path).parent
         self.output_root = Path(output_root)
         self.time_step = time_step
@@ -22,6 +26,9 @@ class CIFAR10DVSPreprocessor:
         self.num_workers = num_workers 
         self.dataset_path = Path(dataset_path)
         self.data_representation = data_represenation  # "voxel" | "exp_frames"
+        self.pos_polarity = pos_polarity
+        self.neg_polarity = neg_polarity
+        self.max_events_per_px = max_events_per_px
 
     def to_dict(self):
         return {
@@ -53,12 +60,12 @@ class CIFAR10DVSPreprocessor:
     
     def __build_raw_voxel_grid(self, t, x, y, p, n_bins):
         """
-        Tworzy zwykłe event frame'y na podstawie zdarzeń.
+        Tworzy voxel grid na podstawie zdarzeń z p==1.
         Parameters
         x, y : ndarray
             Współrzędne pikseli zdarzeń
-        p : ndarra 
-            Polaryzacja zdarzeń (-1/1)
+        p : ndarray
+            Polaryzacja zdarzeń (0/1)
         n_bins : int
             Liczba przedziałów czasowych
 
@@ -75,6 +82,8 @@ class CIFAR10DVSPreprocessor:
         for b, xi, yi, pi in zip(bin_idx, x, y, p):
             voxel[b, xi, yi] += pi
 
+        voxel = np.clip(voxel, 0, self.max_events_per_px)
+        
         return voxel
     
     def __build_exp_frames(self, t, x, y, p, n_bins, delta_t):
@@ -95,9 +104,11 @@ class CIFAR10DVSPreprocessor:
         """
 
         H, W = self.sensor_size
-        frames = np.zeros((n_bins, H, W), dtype=np.float32)
+        frames = np.zeros((n_bins, H, W), dtype=np.float32) + 128
 
         t_sec = (t - t.min()) * 1e-6  # us → s
+
+        p[p==0] = -1
 
         bin_idx = ((t - t.min()) / self.time_step).astype(int)
         bin_idx = np.clip(bin_idx, 0, n_bins - 1)
@@ -112,7 +123,7 @@ class CIFAR10DVSPreprocessor:
 
         np.maximum.at(frames, (bin_idx, x, y), (p * decay + 1.0) * (255.0 / 2.0))
 
-        return frames
+        return frames.astype(int)
 
     def _process_single(self, args):
         file_path, label = args
@@ -130,10 +141,20 @@ class CIFAR10DVSPreprocessor:
         t_min, t_max = t.min(), t.max()
         n_bins = int(np.ceil((t_max - t_min) / self.time_step))
 
+        voxel = []
+
         if self.data_representation == "exp_frames":
-            voxel = self.__build_exp_frames(t, x, y, p, n_bins, delta_t=0.06)
+            voxel.append(self.__build_exp_frames(t, x, y, p, n_bins, delta_t=0.06))
         else:  # self.data_representation == "voxel"
-            voxel = self.__build_raw_voxel_grid(t, x, y, p, n_bins)
+            if self.pos_polarity:
+                voxel.append(self.__build_raw_voxel_grid(t, x, y, p, n_bins))
+            if self.neg_polarity:
+                p = -(p-1)
+                voxel.append(self.__build_raw_voxel_grid(t, x, y, p, n_bins))
+
+        voxel = np.array(voxel).transpose((1,0,2,3))  #  pol_channels, n_bins, h, w -> n_bins, pol_channels, h, w
+        if voxel.shape[1] == 1:
+            voxel = voxel.squeeze(1)  # n_bins, 1, h, w -> n_bins, h, w
 
         for bin_id in range(n_bins):
             out_path = class_folder / f"{file_path.stem}_{bin_id}_raw.npz"
@@ -163,12 +184,12 @@ class CIFAR10DVSPreprocessor:
 if __name__ == "__main__":
     pre = CIFAR10DVSPreprocessor(
         dataset_path="./data/CIFAR10DVS",
-        # output_root="./data/cifar10dvs_raw_bins",
-        output_root="./data/cifar10dvs_exp_frames",
-        time_step=100_000,
+        output_root="./data/cifar10dvs_raw_bins",
+        time_step=40_000,
         sensor_size=(128, 128),
         num_workers=8,
-        # data_represenation="voxel",
-        data_represenation="exp_frames"
+        data_represenation="voxel",
+        # pos_polarity=True,
+        # neg_polarity=True
     )
     pre.run()
