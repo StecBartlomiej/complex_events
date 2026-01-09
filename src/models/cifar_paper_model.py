@@ -12,7 +12,7 @@ class ComplexCifarPaper(LightningModule):
         self.in_ch = in_ch
         self.save_hyperparameters()
 
-        self.conv1 = FrequencyConv2D(1, 32, kernel_size=64)
+        self.conv1 = FrequencyConv2D(in_ch, 32, kernel_size=64)
         self.ln1 = FrequencyInstanceNorm2D(32)
 
         self.layer1 = self._make_layer(32, 64, kernel_size=32, num_blocks=1)
