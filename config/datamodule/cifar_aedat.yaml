@@ -1,0 +1,13 @@
+_target_: datamodules.cifar_aedat.CIFAR10DVSAedatDataModule
+batch_size: 64
+num_workers: 14
+val_split: 0.15
+test_split: 0.15
+sensor_size: [64, 64]
+time_step: 20e3
+sample_bins: 4
+num_classes: 10
+pos_polarity: true
+neg_polarity: true
+max_events_per_px: 50
+join_channels: true

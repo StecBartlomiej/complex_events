@@ -18,3 +18,9 @@ train_cifar_paper:
 
 train_cifar_small:
 	python3 src/main.py datamodule=cifar model=cifar_small
+
+train_cifar_aedat_paper:
+	python3 src/main.py datamodule=cifar_aedat model=cifar_paper
+
+train_cifar_aedat_small:
+	python3 src/main.py datamodule=cifar_aedat model=cifar_small

@@ -44,10 +44,9 @@ def build_single_bin(
     t1 = t0 + time_step
 
     mask = (t >= t0) & (t < t1)
-    x, y, p = x[mask], y[mask], p[mask]
+    x_m, y_m, p_m = x[mask], y[mask], p[mask]
 
-    for xi, yi, pi in zip(x, y, p):
-        frame[xi, yi] += pi
+    np.add.at(frame, (x_m, y_m), p_m)
 
     frame = np.clip(frame, 0, max_events_per_px)
     return frame
@@ -80,7 +79,8 @@ class CIFAR10DVSBinsAeadat(Dataset):
         max_events_per_px=5,
         transform=None,
         event_transform=None,
-        num_classes=10
+        num_classes=10,
+        join_channels=True
     ):
         self.root = root
         self.video_ids = video_ids
@@ -93,6 +93,7 @@ class CIFAR10DVSBinsAeadat(Dataset):
         self.transform = transform
         self.event_transform = event_transform
         self.num_classes = num_classes
+        self.join_channels = join_channels
 
         # (file_path, label, start_bin)
         self.samples = []
@@ -139,46 +140,44 @@ class CIFAR10DVSBinsAeadat(Dataset):
         x = events['x'].astype(np.int32)
         y = events['y'].astype(np.int32)
         p = events['p'].astype(np.float32)
+
         if self.event_transform:
             t, x, y, p = self.event_transform(t, x, y, p)
 
-        frames = []
+        K = self.sample_bins
+        H, W = self.sensor_size
+        C = int(self.pos_polarity) + int(self.neg_polarity)
 
-        for bin_offset in range(self.sample_bins):
-            bin_id = start_bin + bin_offset
+        t_min = t.min()
+        bin_idx = ((t - t_min) // self.time_step).astype(np.int32)
 
-            channels = []
+        mask = (bin_idx >= start_bin) & (bin_idx < start_bin + K)
+        x = x[mask]
+        y = y[mask]
+        p = p[mask]
+        bin_idx = bin_idx[mask] - start_bin
 
-            if self.pos_polarity:
-                channels.append(
-                    build_single_bin(
-                        t, x, y, p,
-                        bin_id,
-                        self.time_step,
-                        self.sensor_size,
-                        self.max_events_per_px
-                    )
-                )
+        x = (x * W) // 128
+        y = (y * H) // 128
 
-            if self.neg_polarity:
-                pn = -(p - 1)
-                channels.append(
-                    build_single_bin(
-                        t, x, y, pn,
-                        bin_id,
-                        self.time_step,
-                        self.sensor_size,
-                        self.max_events_per_px
-                    )
-                )
+        voxel = np.zeros((K, C, H, W), dtype=np.float32)
 
-            frame = np.stack(channels, axis=0)  # (C, H, W)
-            frames.append(frame)
+        c: int = 0
+        if self.pos_polarity:
+            np.add.at(voxel, (bin_idx, c, x, y), p) # type: ignore
+            c += 1
 
-        voxel = np.stack(frames, axis=0)  # (K, C, H, W)
+        if self.neg_polarity:
+            pn = -(p - 1)
+            np.add.at(voxel, (bin_idx, c, x, y), pn) # type: ignore
+
+        np.clip(voxel, 0, self.max_events_per_px, out=voxel)
 
         if self.transform:
             voxel = self.transform(voxel)
+
+        if self.join_channels:
+            voxel = voxel.reshape(-1, voxel.shape[2], voxel.shape[3]) # type: ignore
 
         return voxel, label
     
@@ -200,7 +199,8 @@ class CIFAR10DVSAedatDataModule(LightningDataModule):
         num_classes=10,
         pos_polarity=True,
         neg_polarity=True,
-        max_events_per_px=5
+        max_events_per_px=5, 
+        join_channels=False,
     ):
         super().__init__()
         self.batch_size = batch_size
@@ -215,6 +215,7 @@ class CIFAR10DVSAedatDataModule(LightningDataModule):
         self.pos_polarity = pos_polarity
         self.neg_polarity = neg_polarity
         self.max_events_per_px = max_events_per_px
+        self.join_channels = join_channels
 
         # Transformacje na voxel grid
         self.train_transform = transforms.Compose([
@@ -227,7 +228,9 @@ class CIFAR10DVSAedatDataModule(LightningDataModule):
             transforms.Normalize(mean=[0], std=[1]),
         ])
 
-    def setup(self, stage=None):
+        self._compute_split()
+
+    def _compute_split(self):
         # zbierz video_id dla każdej klasy
         video_per_label: dict[int, list[str]] = {i: [] for i in range(self.num_classes)}
 
@@ -237,27 +240,32 @@ class CIFAR10DVSAedatDataModule(LightningDataModule):
                     label = NAME_TO_LABEL[class_folder.name]
                 else:
                     label = int(class_folder.name)
-                    
+
+                if label >= self.num_classes:
+                    continue
+
                 for f in class_folder.iterdir():
                     if f.suffix == ".aedat4":
                         video_id = f.stem.split('_')[2]
                         video_per_label[label].append(video_id)
 
         # Podział na train/val/test
-        train_video_ids: dict[int, set[str]] = {}
-        val_video_ids: dict[int, set[str]] = {}
-        test_video_ids: dict[int, set[str]] = {}
+        self.train_video_ids: dict[int, set[str]] = {}
+        self.val_video_ids: dict[int, set[str]] = {}
+        self.test_video_ids: dict[int, set[str]] = {}
 
         for label, vids in video_per_label.items():
             train_paths, val_paths = train_test_split(list(set(vids)), test_size=self.val_split + self.test_split)
             val_paths, test_paths = train_test_split(val_paths, test_size=self.test_split / (self.val_split + self.test_split))
 
-            train_video_ids[label] = set(train_paths)
-            val_video_ids[label] = set(val_paths)
-            test_video_ids[label] = set(test_paths)
+            self.train_video_ids[label] = set(train_paths)
+            self.val_video_ids[label] = set(val_paths)
+            self.test_video_ids[label] = set(test_paths)
 
+
+    def setup(self, stage=None):
         self.train_dataset = CIFAR10DVSBinsAeadat(
-            video_ids=train_video_ids,
+            video_ids=self.train_video_ids,
             root=self.root,
             sample_bins=self.sample_bins,
             time_step=self.time_step,
@@ -266,11 +274,12 @@ class CIFAR10DVSAedatDataModule(LightningDataModule):
             num_classes=self.num_classes,
             pos_polarity=self.pos_polarity,
             neg_polarity=self.neg_polarity,
-            max_events_per_px=self.max_events_per_px
+            max_events_per_px=self.max_events_per_px,
+            join_channels=self.join_channels
         )
 
         self.val_dataset = CIFAR10DVSBinsAeadat(
-            video_ids=val_video_ids,
+            video_ids=self.val_video_ids,
             root=self.root,
             sample_bins=self.sample_bins,
             time_step=self.time_step,
@@ -279,11 +288,12 @@ class CIFAR10DVSAedatDataModule(LightningDataModule):
             num_classes=self.num_classes,
             pos_polarity=self.pos_polarity,
             neg_polarity=self.neg_polarity,
-            max_events_per_px=self.max_events_per_px
+            max_events_per_px=self.max_events_per_px,
+            join_channels=self.join_channels
         )
 
         self.test_dataset = CIFAR10DVSBinsAeadat(
-            video_ids=test_video_ids,
+            video_ids=self.test_video_ids,
             root=self.root,
             sample_bins=self.sample_bins,
             time_step=self.time_step,
@@ -292,7 +302,8 @@ class CIFAR10DVSAedatDataModule(LightningDataModule):
             num_classes=self.num_classes,
             pos_polarity=self.pos_polarity,
             neg_polarity=self.neg_polarity,
-            max_events_per_px=self.max_events_per_px
+            max_events_per_px=self.max_events_per_px,
+            join_channels=self.join_channels
         )
 
     def train_dataloader(self):
@@ -329,7 +340,7 @@ def main():
         num_workers=4,
         time_step=50_000,
         sample_bins=4,
-        num_classes=1,
+        num_classes=10,
         pos_polarity=True,
         neg_polarity=True,
         max_events_per_px=4

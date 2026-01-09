@@ -25,7 +25,6 @@ def main(cfg):
         filename="best-{epoch:02d}-{val_acc:.3f}",
     )
 
-
     trainer = Trainer(
         max_epochs=cfg.epochs,
         accelerator="auto",
@@ -33,15 +32,17 @@ def main(cfg):
         log_every_n_steps=10,
         default_root_dir='logs',
         logger=logger,
-        callbacks=[checkpoint]
+        callbacks=[checkpoint],
+        #gradient_clip_val=1.0
     )
 
     datamodule = instantiate(cfg.datamodule)
     model = instantiate(cfg.model)
 
     trainer.fit(model, datamodule=datamodule)
-    trainer.validate(datamodule=datamodule)
-    trainer.test(datamodule=datamodule)
+
+    trainer.test(ckpt_path='best', datamodule=datamodule)
+    trainer.test(ckpt_path='last', datamodule=datamodule)
 
 if __name__ == "__main__":
     main()
