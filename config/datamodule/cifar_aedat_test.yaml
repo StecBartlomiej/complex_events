@@ -1,0 +1,4 @@
+_target_: datamodules.cifar_aedat_test.CIFAR10DVSDataModule
+batch_size: 12
+time_window: 50_000
+sample_bins: 8
