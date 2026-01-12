@@ -1,0 +1,6 @@
+_target_: datamodules.tonic_cifar.CIFAR10Datamodule
+batch_size: 64
+num_workers: 15
+resize_size: 64
+time_step: 50e3
+n_bins: 4

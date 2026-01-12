@@ -4,9 +4,9 @@ defaults:
   - model: cifar_paper
 
 common:
-  in_channels: 8
-  lr: 1e-3
+  in_channels: 1
+  lr: 1e-2
  
-epochs: 6
+epochs: 30
 seed: 123
 checkpoint_dir: checkpoints
