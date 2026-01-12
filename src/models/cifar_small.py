@@ -5,7 +5,7 @@ from torch import nn
 from complextorch.nn import Linear, Conv2d, CVCardiod, AdaptiveAvgPool2d
 from pytorch_lightning import LightningModule
 import complextorch.nn.functional as cvF
-import torchcvnn.nn
+import torchcvnn.nn as cvnn
 import utils.complex_layers as cl
 
 
@@ -20,31 +20,42 @@ class ComplexCifar(LightningModule):
 
         self.act = cnn.CVCardiod()
 
-        self.conv1 = cl.FrequencyConv2D(self.in_ch, 16, kernel_size=64)
-        self.norm1 = cl.FrequencyInstanceNorm2D(16)
+        self.conv1 = cl.FrequencyConv2D(self.in_ch, 24, kernel_size=64)
+        self.norm1 = cvnn.BatchNorm2d(24)
         self.pool1 = cl.ComplexAdaptiveAvgPool2d(32)
 
-        self.conv2 = cl.FrequencyConv2D(16, 24, kernel_size=32)
-        self.norm2 = cl.FrequencyInstanceNorm2D(24)
+        self.conv2 = cl.FrequencyConv2D(24, 32, kernel_size=32)
+        self.norm2 = cvnn.BatchNorm2d(32)
         self.pool2 = cl.ComplexAdaptiveAvgPool2d(16)
 
-        self.conv3 = cl.FrequencyConv2D(24, 32, kernel_size=16)
-        self.norm3 = cl.FrequencyInstanceNorm2D(32)
+        self.conv3 = cl.FrequencyConv2D(32, 64, kernel_size=16)
+        self.norm3 = cvnn.BatchNorm2d(64)
         self.pool3 = cl.ComplexAdaptiveAvgPool2d(8)
         
-        # self.conv4 = cl.FrequencyConv2D(128, 256, kernel_size=8)
-        # self.norm4 = cl.FrequencyInstanceNorm2D(256)
-        # self.pool4 = cl.ComplexAdaptiveAvgPool2d(4)
+        self.conv4 = cl.FrequencyConv2D(64, 128, kernel_size=8)
+        self.norm4 = cvnn.BatchNorm2d(128)
+        self.pool4 = cl.ComplexAdaptiveAvgPool2d(4)
+
+        # self.conv4 = cl.FrequencyConv2D(64, 128, kernel_size=4)
+        # self.norm4 = cvnn.BatchNorm2d(128)
+        # self.pool4 = cl.ComplexAdaptiveMaxPool2d(output_size=(1, 1))
 
         self.dropout = cl.ComplexDropout(p=0.3)
-        self.fc1 = Linear(32 * 8 * 8, 512)
-        self.fc2 = Linear(512, 256)
-        self.classifier = Linear(256, 10)
+        self.fc1 = cl.FrequencyLinear(128 * 4 * 4, 256)
+        self.fc2 = Linear(256, 128)
+        self.classifier = Linear(128, 10)
+
+        self.loss = nn.CrossEntropyLoss()
 
     def forward(self, input):
-        x_complex = torch.fft.fft2(input)
+        # x_complex = torch.fft.fft2(input, dim=(-2, -1), norm='ortho')
+        # x_shift = torch.fft.fftshift(x_complex, dim=(-2, -1))
 
-        x = self.conv1(x_complex)
+        x_complex = torch.fft.rfft(input, dim=1, norm='ortho')
+        x_shift = torch.fft.fftshift(x_complex, dim=1)
+
+
+        x = self.conv1(x_shift)
         x = self.norm1(x)
         x = self.act(x)
         x = self.pool1(x)
@@ -59,10 +70,10 @@ class ComplexCifar(LightningModule):
         x = self.act(x)
         x = self.pool3(x)
 
-        # x = self.conv4(x)
-        # x = self.norm4(x)
-        # x = self.act(x)
-        # x = self.pool4(x)
+        x = self.conv4(x)
+        x = self.norm4(x)
+        x = self.act(x)
+        x = self.pool4(x)
 
         x = torch.flatten(x, 1)
 
@@ -85,7 +96,7 @@ class ComplexCifar(LightningModule):
         # convert complex logits to real logits by using magnitude (abs)
         logits_real = torch.abs(logits_complex)
 
-        loss = F.cross_entropy(logits_real, y)
+        loss = self.loss(logits_real, y)
         preds = torch.argmax(logits_real, dim=1)
 
         acc = (preds == y).float().mean()
@@ -102,7 +113,8 @@ class ComplexCifar(LightningModule):
         logits_real = torch.abs(logits_complex)
 
 
-        loss = F.cross_entropy(logits_real, y)
+        #loss = F.cross_entropy(logits_real, y)
+        loss = self.loss(logits_real, y)
         preds = torch.argmax(logits_real, dim=1)
 
         acc = (preds == y).float().mean()
@@ -118,7 +130,7 @@ class ComplexCifar(LightningModule):
         logits_real = torch.abs(logits_complex)
 
 
-        loss = F.cross_entropy(logits_real, y)
+        loss = self.loss(logits_real, y)
         preds = torch.argmax(logits_real, dim=1)
 
         acc = (preds == y).float().mean()
@@ -129,7 +141,7 @@ class ComplexCifar(LightningModule):
 
     def configure_optimizers(self): # type: ignore
         opt = torch.optim.Adam(self.parameters(), lr=self.hparams.lr) # type: ignore
-        scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(opt, mode='min', factor=0.5, patience=5)
+        scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(opt, mode='min', factor=0.1, patience=4)
         return {
                 'optimizer': opt,
                 'lr_scheduler': scheduler,

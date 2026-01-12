@@ -6,6 +6,14 @@ from utils.complex_layers import *
 
 
 
+def hann2d(height, width, device=None, dtype=torch.float32):
+    wy = torch.hann_window(height, periodic=False, device=device, dtype=dtype)
+    wx = torch.hann_window(width, periodic=False, device=device, dtype=dtype)
+    window = wy[:, None] * wx[None, :]
+    return window
+
+
+
 class ComplexCifarPaper(LightningModule):
     def __init__(self, in_ch, lr: float = 1e-3):
         super(ComplexCifarPaper, self).__init__()
@@ -15,9 +23,9 @@ class ComplexCifarPaper(LightningModule):
         self.conv1 = FrequencyConv2D(in_ch, 32, kernel_size=64)
         self.ln1 = FrequencyInstanceNorm2D(32)
 
-        self.layer1 = self._make_layer(32, 64, kernel_size=32, num_blocks=1)
-        self.layer2 = self._make_layer(64, 128, kernel_size=16, num_blocks=1)
-        self.layer3 = self._make_layer(128, 256, kernel_size=8, num_blocks=1)
+        self.layer1 = self._make_layer(32, 64, kernel_size=32, num_blocks=2)
+        self.layer2 = self._make_layer(64, 128, kernel_size=16, num_blocks=2)
+        self.layer3 = self._make_layer(128, 256, kernel_size=8, num_blocks=2)
         # self.layer4 = self._make_layer(512, 512, kernel_size=4, num_blocks=1)
 
         self.pooling_layer = ComplexAdaptiveAvgPool2d(output_size=(32, 32))
@@ -30,6 +38,11 @@ class ComplexCifarPaper(LightningModule):
         self.fc2 = FrequencyLinear(256, 10)
         self.dropout = ComplexDropout(p=0.3)
 
+        self.loss = nn.CrossEntropyLoss()
+
+        window = hann2d(64, 64)
+        self.register_buffer("window", window)
+
     def _make_layer(self, in_channels, out_channels, kernel_size, num_blocks):
         layers = []
         for _ in range(num_blocks):
@@ -38,9 +51,18 @@ class ComplexCifarPaper(LightningModule):
         return nn.Sequential(*layers)
 
     def forward(self, input):
-        x_complex = torch.fft.fft2(input)
 
-        x = LOG_Magnitude(self.ln1(self.conv1(x_complex)))
+        # B, T, C, H, W = input.shape
+        # input = input.reshape(B, T * C, H, W)
+
+        # input = input * self.window  
+        # x_complex = torch.fft.fft2(input, dim=(-2, -1), norm='ortho')
+        # x_shift = torch.fft.fftshift(x_complex, dim=(-2, -1))
+
+        x_complex = torch.fft.rfft(input, dim=1, norm='ortho')
+        x_shift = torch.fft.fftshift(x_complex, dim=1)
+
+        x = LOG_Magnitude(self.ln1(self.conv1(x_shift)))
         x = self.pooling_layer(x)
 
 
@@ -72,9 +94,8 @@ class ComplexCifarPaper(LightningModule):
         # convert complex logits to real logits by using magnitude (abs)
         logits_real = torch.abs(logits_complex)
 
-        loss = F.cross_entropy(logits_real, y)
+        loss = self.loss(logits_real, y)
         preds = torch.argmax(logits_real, dim=1)
-
         acc = (preds == y).float().mean()
 
         self.log('train_loss', loss, on_step=False, on_epoch=True, prog_bar=True)
@@ -120,6 +141,6 @@ class ComplexCifarPaper(LightningModule):
         return {
                 'optimizer': opt,
                 'lr_scheduler': scheduler,
-                'monitor': 'train_loss'
+                'monitor': 'val_loss'
                 }
 
