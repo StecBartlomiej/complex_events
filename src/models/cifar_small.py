@@ -18,32 +18,38 @@ class ComplexCifar(LightningModule):
         self.img_size = img_size
         self.save_hyperparameters()
 
+        self.conv0 = torch.nn.Conv2d(in_ch, 32, 3, padding=1)
+
         self.act = cnn.CVCardiod()
 
-        self.conv1 = cl.FrequencyConv2D(self.in_ch, 24, kernel_size=64)
-        self.norm1 = cvnn.BatchNorm2d(24)
+        self.conv1 = cl.FrequencyConv2D(32, 32, kernel_size=64)
+        # self.norm1 = cvnn.BatchNorm2d(24)
+        self.norm1 = cl.FrequencyInstanceNorm2D(32)
         self.pool1 = cl.ComplexAdaptiveAvgPool2d(32)
 
-        self.conv2 = cl.FrequencyConv2D(24, 32, kernel_size=32)
-        self.norm2 = cvnn.BatchNorm2d(32)
+        self.conv2 = cl.FrequencyConv2D(32, 64, kernel_size=32)
+        # self.norm2 = cvnn.BatchNorm2d(32)
+        self.norm2 = cl.FrequencyInstanceNorm2D(64)
         self.pool2 = cl.ComplexAdaptiveAvgPool2d(16)
 
-        self.conv3 = cl.FrequencyConv2D(32, 64, kernel_size=16)
-        self.norm3 = cvnn.BatchNorm2d(64)
+        self.conv3 = cl.FrequencyConv2D(64, 128, kernel_size=16)
+        # self.norm3 = cvnn.BatchNorm2d(64)
+        self.norm3 = cl.FrequencyInstanceNorm2D(128)
         self.pool3 = cl.ComplexAdaptiveAvgPool2d(8)
         
-        self.conv4 = cl.FrequencyConv2D(64, 128, kernel_size=8)
-        self.norm4 = cvnn.BatchNorm2d(128)
+        self.conv4 = cl.FrequencyConv2D(128, 256, kernel_size=8)
+        # self.norm4 = cvnn.BatchNorm2d(128)
+        self.norm4 = cl.FrequencyInstanceNorm2D(256)
         self.pool4 = cl.ComplexAdaptiveAvgPool2d(4)
 
         # self.conv4 = cl.FrequencyConv2D(64, 128, kernel_size=4)
         # self.norm4 = cvnn.BatchNorm2d(128)
         # self.pool4 = cl.ComplexAdaptiveMaxPool2d(output_size=(1, 1))
 
-        self.dropout = cl.ComplexDropout(p=0.3)
-        self.fc1 = cl.FrequencyLinear(128 * 4 * 4, 256)
-        self.fc2 = Linear(256, 128)
-        self.classifier = Linear(128, 10)
+        self.dropout = cl.ComplexDropout(p=0.2)
+        self.fc1 = cl.FrequencyLinear(256 * 4 * 4, 256)
+        self.fc2 = cl.FrequencyLinear(256, 128)
+        self.classifier = cl.FrequencyLinear(128, 10)
 
         self.loss = nn.CrossEntropyLoss()
 
@@ -51,9 +57,21 @@ class ComplexCifar(LightningModule):
         # x_complex = torch.fft.fft2(input, dim=(-2, -1), norm='ortho')
         # x_shift = torch.fft.fftshift(x_complex, dim=(-2, -1))
 
-        x_complex = torch.fft.rfft(input, dim=1, norm='ortho')
-        x_shift = torch.fft.fftshift(x_complex, dim=1)
+        # B, C, H, W = input.shape
+        #
+        # # unsplit polarity channels
+        # input_split = input.reshape(B, C//2, 2, H, W) 
+        #
+        # x_in = torch.complex(
+        #         input_split[:, :, 0, :, :],
+        #         input_split[:, :, 1, :, :], 
+        #         )
 
+        # Voxel grid
+        x_in = self.conv0(input)
+
+        x_fft2d = torch.fft.fftn(x_in, dim=(-2, -1), norm='ortho')
+        x_shift = torch.fft.fftshift(x_fft2d, dim=(-2, -1))
 
         x = self.conv1(x_shift)
         x = self.norm1(x)

@@ -8,3 +8,4 @@ complex_event/
 /wandb
 .vevn/
 checkpoints/
+/metadata

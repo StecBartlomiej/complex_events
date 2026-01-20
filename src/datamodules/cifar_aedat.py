@@ -30,39 +30,6 @@ def get_video_id(file_name: str):
     return video_id
 
 
-def build_single_bin(
-    t, x, y, p,
-    bin_id,
-    time_step,
-    sensor_size,
-    max_events_per_px
-):
-    H, W = sensor_size
-    frame = np.zeros((H, W), dtype=np.float32)
-
-    t0 = t.min() + bin_id * time_step
-    t1 = t0 + time_step
-
-    mask = (t >= t0) & (t < t1)
-    x_m, y_m, p_m = x[mask], y[mask], p[mask]
-
-    np.add.at(frame, (x_m, y_m), p_m)
-
-    frame = np.clip(frame, 0, max_events_per_px)
-    return frame
-
-
-class ResizeVoxel:
-    def __init__(self, size):
-        self.size = size
-        self.resize = transforms.Resize(size)
-
-    def __call__(self, voxel):
-        # voxel: (K,C,H,W)
-        resized = [self.resize(torch.tensor(v, dtype=torch.float)) for v in voxel]
-        return torch.stack(resized, dim=0)  # (K,C,H,W)
-    
-
 class CIFAR10DVSBinsAeadat(Dataset):
     '''
     Item shape: [sample_bins, polarity_channels, sensor_size[0], sensor_size[1]]
@@ -118,10 +85,9 @@ class CIFAR10DVSBinsAeadat(Dataset):
                 events = np.array(tonic.io.read_aedat4(str(f)))
                 t = events['t']
                 t_min, t_max = t.min(), t.max()
-                n_bins = int(np.ceil((t_max - t_min) / self.time_step))
+                n_bins = int(np.floor((t_max - t_min) / self.time_step))
 
-                # tylko takie starty, żeby zmieścić sample_bins
-                for start_bin in range(0, n_bins - sample_bins + 1, sample_bins):
+                for start_bin in range(0, n_bins):
                     self.samples.append((f, label, start_bin))
 
         print(
@@ -148,14 +114,19 @@ class CIFAR10DVSBinsAeadat(Dataset):
         H, W = self.sensor_size
         C = int(self.pos_polarity) + int(self.neg_polarity)
 
-        t_min = t.min()
-        bin_idx = ((t - t_min) // self.time_step).astype(np.int32)
+        sample_idx = ((t - t.min()) // self.time_step).astype(np.int32)
 
-        mask = (bin_idx >= start_bin) & (bin_idx < start_bin + K)
+        mask = (sample_idx == start_bin)
+        t = t[mask]
         x = x[mask]
         y = y[mask]
         p = p[mask]
-        bin_idx = bin_idx[mask] - start_bin
+
+        p_pos = (p == 1)
+        p_neg = (p == -1)
+
+        bin_time_step = self.time_step / K
+        bin_idx = ((t - t.min()) // bin_time_step).astype(int)
 
         x = (x * W) // 128
         y = (y * H) // 128
@@ -164,20 +135,25 @@ class CIFAR10DVSBinsAeadat(Dataset):
 
         c: int = 0
         if self.pos_polarity:
-            np.add.at(voxel, (bin_idx, c, x, y), p) # type: ignore
+            np.add.at(voxel, (bin_idx, c, y, x), p_pos) # type: ignore
             c += 1
 
         if self.neg_polarity:
-            pn = -(p - 1)
-            np.add.at(voxel, (bin_idx, c, x, y), pn) # type: ignore
+            np.add.at(voxel, (bin_idx, c, y, x), p_neg) # type: ignore
 
         np.clip(voxel, 0, self.max_events_per_px, out=voxel)
 
+        voxel = torch.tensor(voxel)
         if self.transform:
             voxel = self.transform(voxel)
 
         if self.join_channels:
             voxel = voxel.reshape(-1, voxel.shape[2], voxel.shape[3]) # type: ignore
+
+        # standarize values to [0, 1.0]
+        max = voxel.max() 
+        min = voxel.min()
+        voxel =  (voxel - min) / (max - min)
 
         return voxel, label
     
@@ -219,13 +195,14 @@ class CIFAR10DVSAedatDataModule(LightningDataModule):
 
         # Transformacje na voxel grid
         self.train_transform = transforms.Compose([
-            ResizeVoxel((64, 64)),
-            transforms.Normalize(mean=[0], std=[1]),
+            transforms.Resize((64, 64), interpolation=transforms.InterpolationMode.NEAREST),
+            #transforms.Normalize(mean=[0], std=[1]),
+            transforms.RandomHorizontalFlip(0.3),
             transforms.RandomRotation(10)
         ])
         self.val_test_transform = transforms.Compose([
-            ResizeVoxel((64, 64)),
-            transforms.Normalize(mean=[0], std=[1]),
+            transforms.Resize((64, 64), interpolation=transforms.InterpolationMode.NEAREST),
+            #transforms.Normalize(mean=[0], std=[1]),
         ])
 
         self._compute_split()

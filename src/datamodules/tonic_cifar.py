@@ -1,16 +1,16 @@
-from math import exp
-import tonic
-from tonic import MemoryCachedDataset, SlicedDataset
-from tonic.slicers import SliceByTime
-from pytorch_lightning import LightningDataModule
-from tonic.transforms import NumpyAsType
-from torch.utils.data import DataLoader, random_split
+from functools import cache
 import torch
+import pytorch_lightning as pl
+from torch.utils.data import DataLoader
+from sklearn.model_selection import train_test_split
 from torchvision import transforms
-import torchvision.transforms.v2 as v2
+
+import tonic
+from tonic import CachedDataset
+from tonic.slicers import SliceByTime
+from tonic.sliced_dataset import SlicedDataset
+
 import matplotlib.pyplot as plt
-import numpy as np
-from dataclasses import dataclass
 
 
 LABEL_TO_NAME = {
@@ -27,74 +27,9 @@ LABEL_TO_NAME = {
 }
 
 
-@dataclass(frozen=True)
-class ToVoxelGrid:
-    sensor_size: tuple[int, int, int]
-    n_time_bins: int
-
-    def __call__(self, in_events):
-        events = in_events.copy()
-        assert self.sensor_size[2] == 2
-
-        voxel_grid = np.zeros((self.n_time_bins, self.sensor_size[1], self.sensor_size[0]), float).ravel()
-
-        # normalize the event timestamps so that they lie between 0 and n_time_bins
-        try:
-            ts = (
-                self.n_time_bins
-                * (events["t"].astype(float) - events["t"][0])
-                / (events["t"][-1] - events["t"][0])
-            )
-        except IndexError:
-            print(events)
-
-        xs = events["x"].astype(int)
-        ys = events["y"].astype(int)
-        pols = events["p"]
-        pols[pols == 0] = -1  # polarity should be +1 / -1
-
-        tis = ts.astype(int)
-        dts = ts - tis
-        vals_left = pols * (1.0 - dts)
-        vals_right = pols * dts
-
-        valid_indices = tis < self.n_time_bins
-        np.add.at(
-            voxel_grid,
-            xs[valid_indices]
-            + ys[valid_indices] * self.sensor_size[0]
-            + tis[valid_indices] * self.sensor_size[0] * self.sensor_size[1],
-            vals_left[valid_indices],
-        )
-
-        valid_indices = (tis + 1) < self.n_time_bins
-        np.add.at(
-            voxel_grid,
-            xs[valid_indices]
-            + ys[valid_indices] * self.sensor_size[0]
-            + (tis[valid_indices] + 1) * self.sensor_size[0] * self.sensor_size[1],
-            vals_right[valid_indices],
-        )
-
-        voxel_grid = np.reshape(
-            voxel_grid, (self.n_time_bins, 1, self.sensor_size[1], self.sensor_size[0])
-        )
-
-        return voxel_grid
-
-
-class ToDict:
-    def __call__(self, events):
-        x = {"x": events["x"], 
-             'y': events["y"],
-             't': events["t"],
-             'p': events["p"]
-             }
-        return x
-
 class ToTorchTensor:
     def __call__(self, x):
-        x = torch.from_numpy(x).float()
+        x = torch.from_numpy(x).float().clone()
 
         if len(x.shape) == 3:
             return x
@@ -102,124 +37,157 @@ class ToTorchTensor:
         T, C, H, W = x.shape
         return x.reshape(T * C, H, W)
 
-class Torch:
-    def __call__(self, x):
-        x = torch.from_numpy(x).float()
-        T, C, H, W = x.shape
-        return x.reshape(T * C, H, W)
 
-class CIFAR10Datamodule(LightningDataModule):
-    def __init__(self, batch_size=16, num_workers=5, resize_size=128, 
-                 time_step=50_000, n_bins=5):
+class TonicDatsetWithIdx:
+    def __init__(self, dataset, video_id):
+        self.dataset = dataset
+        self.video_id = video_id
+
+    def __len__(self):
+        return len(self.video_id)
+
+    def __getitem__(self, idx):
+        video_id = self.video_id[idx]
+        return self.dataset[video_id]
+
+
+class CIFAR10Datamodule(pl.LightningDataModule):
+    def __init__(
+        self,
+        data_dir: str = "./data",
+        n_time_bins: int = 10,
+        frame_time_us: int = 100_000,   # 10 ms
+        batch_size: int = 64,
+        num_workers: int = 0,
+    ):
         super().__init__()
+        self.data_dir = data_dir
+        self.n_time_bins = n_time_bins
+        self.frame_time_us = frame_time_us
         self.batch_size = batch_size
         self.num_workers = num_workers
-        self.resize_size = resize_size
-        self.time_step = time_step
-        self.n_bins = n_bins
-        self.sensor_size = tonic.datasets.CIFAR10DVS.sensor_size
 
 
-        dataset = tonic.datasets.CIFAR10DVS(save_to="./data/")
-        self.train_data, self.val_data, self.test_data = random_split(dataset, [0.7, 0.15, 0.15]) # type: ignore
+    def setup(self, stage=None):
+        base_ds = tonic.datasets.CIFAR10DVS(save_to=self.data_dir)
 
-        # frame_transform = tonic.transforms.ToFrame(sensor_size=tonic.datasets.CIFAR10DVS.sensor_size,
-        #                                            n_time_bins=n_bins,
-        #                                            include_incomplete=True,
-        #                                            overlap=self.overlap)
+        # Split videos before slicing 
+        all_ids = list(range(len(base_ds)))
+        all_targets = [base_ds.targets[id] for id in all_ids]
 
-        frame_transform = ToVoxelGrid(sensor_size=self.sensor_size, n_time_bins=n_bins)
+        # even split of all classes 
+        id_train, id_val_test, _, target_val_test = train_test_split(all_ids, all_targets, test_size=0.3, random_state=42, stratify=all_targets)
+        id_val, id_test, _, _ = train_test_split(id_val_test, target_val_test, test_size=0.5, random_state=42, stratify=target_val_test)
 
-        self.train_transform = transforms.Compose([
-            # tonic.transforms.Denoise(filter_time=10e3),
-            ToDict(),
-            frame_transform,
+
+        slicer = SliceByTime(
+            time_window=self.frame_time_us,
+            overlap=0,
+            include_incomplete=False,
+        )
+
+
+        to_frame = tonic.transforms.ToVoxelGrid(
+                sensor_size=tonic.datasets.CIFAR10DVS.sensor_size,
+                n_time_bins=self.n_time_bins,)
+
+        # to_frame = tonic.transforms.ToFrame(
+        #         sensor_size=tonic.datasets.CIFAR10DVS.sensor_size,
+        #         n_time_bins=self.n_time_bins,)
+
+        # to_frame = tonic.transforms.ToTimesurface(
+        #     sensor_size=tonic.datasets.CIFAR10DVS.sensor_size,
+        #     dt=10_000,
+        #     tau=15_000,
+        # )
+
+        train_transform = transforms.Compose([
+            to_frame,
             ToTorchTensor(),
-            v2.ToDtype(torch.float32, scale=True),
-            transforms.Resize((self.resize_size, self.resize_size), 
-                              interpolation=transforms.InterpolationMode.NEAREST),
-            transforms.RandomHorizontalFlip()
-            ])
-
-        self.test_transform = transforms.Compose([
-            # tonic.transforms.Denoise(filter_time=10e3),
-            ToDict(),
-            frame_transform,
+            transforms.Resize((64, 64), interpolation=transforms.InterpolationMode.NEAREST),
+            #transforms.RandomRotation(10),
+            ]
+           )
+        test_transform = transforms.Compose([
+            to_frame,
             ToTorchTensor(),
-            v2.ToDtype(torch.float32, scale=True),
-            transforms.Resize((self.resize_size, self.resize_size), 
-                               interpolation=transforms.InterpolationMode.NEAREST),
-            ])
+            transforms.Resize((64, 64), interpolation=transforms.InterpolationMode.NEAREST),
+            ]
+       )
 
-    def setup(self, stage=None): 
-        print(f"Slice time: {self.time_step}")
-        slicer = SliceByTime(time_window=self.time_step, include_incomplete=False)
-        self.train_ds = MemoryCachedDataset(SlicedDataset(self.train_data, slicer=slicer, # type: ignore
-                                       metadata_path="./metadata/cifar10/train",
-                                       transform=self.train_transform))
+        train_aa = TonicDatsetWithIdx(base_ds, id_train)
+        self.train_sliced_ds = SlicedDataset(train_aa, # type: ignore 
+                                            slicer=slicer, # type: ignore 
+                                            transform=train_transform, 
+                                            )
 
-        self.val_ds = MemoryCachedDataset(SlicedDataset(self.val_data, slicer=slicer, # type: ignore
-                                       metadata_path="./metadata/cifar10/val",
-                                       transform=self.test_transform))
 
-        self.test_ds = MemoryCachedDataset(SlicedDataset(self.test_data, slicer=slicer, # type: ignore
-                                       metadata_path="./metadata/cifar10/test",
-                                       transform=self.test_transform))
+        val_aa = TonicDatsetWithIdx(base_ds, id_val)
+
+        self.val_sliced_ds = SlicedDataset(val_aa, # type: ignore
+                                      slicer=slicer, # type: ignore
+                                      transform=test_transform,
+                                      )
+
+        test_aa = TonicDatsetWithIdx(base_ds, id_test)
+        self.test_sliced_ds = SlicedDataset(test_aa, # type: ignore
+                                       slicer=slicer, # type: ignore
+                                       transform=test_transform,
+                                       )
+
+        print(f"train_sliced:{len(self.train_sliced_ds)}")
+        print(f"val_sliced:{len(self.val_sliced_ds)}")
+        print(f"test_sliced:{len(self.test_sliced_ds)}")
+        
+
 
     def train_dataloader(self):
-        return DataLoader(self.train_ds, # type: ignore
-                          batch_size=self.batch_size,
-                          shuffle=True,
-                          num_workers=self.num_workers,
-                          collate_fn=tonic.collation.PadTensors()
-                          )
+        return DataLoader(
+            self.train_sliced_ds, # type: ignore
+            batch_size=self.batch_size, 
+            shuffle=True,
+            num_workers=self.num_workers,
+        )
+
 
     def val_dataloader(self):
-        return DataLoader(self.val_ds, # type: ignore
-                          batch_size=self.batch_size,
-                          shuffle=False,
-                          num_workers=self.num_workers,
-                          collate_fn=tonic.collation.PadTensors()
-                          )
+        return DataLoader(
+            self.val_sliced_ds, # type: ignore
+            batch_size=self.batch_size, 
+            shuffle=False,
+            num_workers=self.num_workers,
+        )
 
     def test_dataloader(self):
-        return DataLoader(self.test_ds, # type: ignore
-                          batch_size=self.batch_size,
-                          shuffle=False,
-                          num_workers=self.num_workers,
-                          collate_fn=tonic.collation.PadTensors() # TODO: check if needed
-                          )
-
-def plot_frames(frames):
-    fig, axes = plt.subplots(1, len(frames))
-    for axis, frame in zip(axes, frames):
-        axis.imshow(frame[1] - frame[0])
-        axis.axis("off")
-    plt.tight_layout()
-
+        return DataLoader(
+                self.test_sliced_ds, # type: ignore
+                batch_size=self.batch_size, 
+                shuffle=False,
+                num_workers=self.num_workers,
+            )
 
 def main():
     dm = CIFAR10Datamodule()
     dm.setup()
 
-    print("Train dataset length:", len(dm.train_ds))
-    print("Val dataset length:", len(dm.val_ds))
-    print("Test dataset length:", len(dm.test_ds))
+    print("Train dataset length:", len(dm.train_sliced_ds))
+    print("Val dataset length:", len(dm.val_sliced_ds))
+    print("Test dataset length:", len(dm.test_sliced_ds))
 
-    img, label = dm.train_ds[0]
+    # img, label = dm.train_sliced_ds[1]
+    img, label = dm.train_sliced_ds[1]
     print(img.shape)
 
     for i in img:
-        plt.imshow(i)
+        plt.imshow(i[0, :, :])
         plt.title(LABEL_TO_NAME[label])
         plt.show()
 
 
     for ds in [dm.train_dataloader(), dm.val_dataloader(), dm.test_dataloader()]:
-        for img, label in dm.train_ds:
-            for i in img:
-                s = torch.sum(i)
-                assert s != 0
+        for img, label in ds:
+            s = torch.sum(img)
+            assert s != 0
 
     # plot_frames(img)
 

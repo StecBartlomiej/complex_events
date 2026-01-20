@@ -93,6 +93,7 @@ class CIFAR10DVSFrames(Dataset):
             sensor_size=sensor_size,
             time_window=time_window,
             include_incomplete=True,
+            overlap=0.1
         )
 
     def __len__(self):
@@ -101,14 +102,6 @@ class CIFAR10DVSFrames(Dataset):
     def __getitem__(self, idx):
         events = tonic.io.read_aedat4(str(self.files[idx]))
         frames = torch.from_numpy(self.to_frame(events)).float()
-
-        T = frames.shape[0]
-        if T >= self.sample_bins:
-            start = torch.randint(0, T - self.sample_bins + 1, (1,)).item()
-            frames = frames[start:start + self.sample_bins]
-        else:
-            pad = self.sample_bins - T
-            frames = torch.nn.functional.pad(frames, (0, 0, 0, 0, 0, 0, 0, pad))
 
         if self.transform:
             frames = self.transform(frames)
@@ -138,25 +131,34 @@ class CIFAR10DVSDataModule(LightningDataModule):
             ResizeFrames((64, 64))
         ])
 
-    def setup(self, stage=None):
         train_f, train_l, val_f, val_l, test_f, test_l = collect_cifar10dvs_files(
             self.data_root, seed=self.seed
         )
 
+        self.train_f = train_f
+        self.train_l = train_l
+        self.val_f = val_f
+        self.val_l = val_l
+        self.test_f = test_f
+        self.test_l = test_l
+
+
+
+    def setup(self, stage=None):
         self.train_ds = CIFAR10DVSFrames(
-            train_f, train_l,
+            self.train_f, self.train_l,
             time_window=self.time_window,
             sample_bins=self.sample_bins,
             transform=self.transform,
         )
         self.val_ds = CIFAR10DVSFrames(
-            val_f, val_l,
+            self.val_f, self.val_l,
             time_window=self.time_window,
             sample_bins=self.sample_bins,
             transform=self.transform,
         )
         self.test_ds = CIFAR10DVSFrames(
-            test_f, test_l,
+            self.test_f, self.test_l,
             time_window=self.time_window,
             sample_bins=self.sample_bins,
             transform=self.transform,

@@ -4,10 +4,10 @@ num_workers: 14
 val_split: 0.15
 test_split: 0.15
 sensor_size: [64, 64]
-time_step: 20e3
-sample_bins: 4
+time_step: 80e3
+sample_bins: 1
 num_classes: 10
 pos_polarity: true
 neg_polarity: true
-max_events_per_px: 50
+max_events_per_px: 1500
 join_channels: true
