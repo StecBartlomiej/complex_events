@@ -8,3 +8,5 @@ aedat
 opencv-python
 wandb
 torchcvnn
+torchvision
+numpy

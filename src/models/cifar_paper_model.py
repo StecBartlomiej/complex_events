@@ -20,7 +20,9 @@ class ComplexCifarPaper(LightningModule):
         self.in_ch = in_ch
         self.save_hyperparameters()
 
-        self.conv1 = FrequencyConv2D(in_ch, 32, kernel_size=64)
+        self.conv0 = torch.nn.Conv2d(in_ch, 32, 3, padding=1)
+
+        self.conv1 = FrequencyConv2D(32, 32, kernel_size=64)
         self.ln1 = FrequencyInstanceNorm2D(32)
 
         self.layer1 = self._make_layer(32, 64, kernel_size=32, num_blocks=2)
@@ -40,8 +42,6 @@ class ComplexCifarPaper(LightningModule):
 
         self.loss = nn.CrossEntropyLoss()
 
-        window = hann2d(64, 64)
-        self.register_buffer("window", window)
 
     def _make_layer(self, in_channels, out_channels, kernel_size, num_blocks):
         layers = []
@@ -51,28 +51,41 @@ class ComplexCifarPaper(LightningModule):
         return nn.Sequential(*layers)
 
     def forward(self, input):
+        #
+        # # B, T, C, H, W = input.shape
+        # # input = input.reshape(B, T * C, H, W)
+        #
+        # # input = input * self.window  
+        # # x_complex = torch.fft.fft2(input, dim=(-2, -1), norm='ortho')
+        # # x_shift = torch.fft.fftshift(x_complex, dim=(-2, -1))
+        #
+        # x_complex = torch.fft.rfft(input, dim=1, norm='ortho')
+        # x_shift = torch.fft.fftshift(x_complex, dim=1)
 
-        # B, T, C, H, W = input.shape
-        # input = input.reshape(B, T * C, H, W)
 
-        # input = input * self.window  
-        # x_complex = torch.fft.fft2(input, dim=(-2, -1), norm='ortho')
-        # x_shift = torch.fft.fftshift(x_complex, dim=(-2, -1))
+        # B, C, H, W = input.shape
+        # # unsplit polarity channels
+        # input_split = input.reshape(B, C//2, 2, H, W) 
+        #
+        # x_in = torch.complex(
+        #         input_split[:, :, 0, :, :],
+        #         input_split[:, :, 1, :, :], 
+        #         )
 
-        x_complex = torch.fft.rfft(input, dim=1, norm='ortho')
-        x_shift = torch.fft.fftshift(x_complex, dim=1)
+        # VOXEL GRID
+        x_in = self.conv0(input)
+
+        x_fft2d = torch.fft.fft2(x_in, dim=(-2, -1), norm='ortho')
+        x_shift = torch.fft.fftshift(x_fft2d, dim=(-2, -1))
 
         x = LOG_Magnitude(self.ln1(self.conv1(x_shift)))
         x = self.pooling_layer(x)
 
-
         x = self.layer1(x)
         x = self.pooling_layer1(x)
 
-
         x = self.layer2(x)
         x = self.pooling_layer2(x)
-
 
         x = self.layer3(x)
         # x = self.pooling_layer3(x)

@@ -1,4 +1,4 @@
-from pytorch_lightning import Trainer
+from pytorch_lightning import Trainer, seed_everything
 import hydra
 from hydra.utils import instantiate
 from omegaconf import OmegaConf
@@ -11,8 +11,7 @@ from pytorch_lightning.callbacks import ModelCheckpoint
 def main(cfg):
     print(OmegaConf.to_yaml(cfg))
 
-    torch.manual_seed(cfg.seed)
-    np.random.seed(cfg.seed)
+    seed_everything(cfg.seed, workers=True)
 
     logger = instantiate(cfg.logger)
 
@@ -33,7 +32,8 @@ def main(cfg):
         default_root_dir='logs',
         logger=logger,
         callbacks=[checkpoint],
-        #gradient_clip_val=1.0
+        # gradient_clip_val=0.05,
+        # gradient_clip_algorithm='norm'
     )
 
     datamodule = instantiate(cfg.datamodule)
@@ -42,7 +42,6 @@ def main(cfg):
     trainer.fit(model, datamodule=datamodule)
 
     trainer.test(ckpt_path='best', datamodule=datamodule)
-    trainer.test(ckpt_path='last', datamodule=datamodule)
 
 if __name__ == "__main__":
     main()
